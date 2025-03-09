@@ -1,252 +1,180 @@
+# Network Monitoring Setup on Debian (VirtualBox)
 
-# Monitoring Tools Setup on Debian VM (VirtualBox)
+Set up **Cacti**, **Netdata**, and **Nagios Core** on a Debian VM for comprehensive network monitoring. Follow these steps to install, configure, and troubleshoot each tool.
 
-This document outlines the installation and basic configuration of Cacti, Icinga 2, and LibreNMS on a Debian VM running in VirtualBox with 10 GB storage and 1GB of RAM.  The focus is on lightweight and efficient monitoring to suit the VM's specifications.
+## Prerequisites
+* Debian VM in VirtualBox (minimal installation)
+* Bridged or NAT network configured for VM access
+* Sudo/root access
+* Terminal access to the VM
 
-**Why These Tools Need MySQL/MariaDB and PHP**
-
-These tools (Cacti, Icinga 2, and LibreNMS) need MySQL/MariaDB and PHP for the following key reasons:
-
-*   **MySQL/MariaDB (Database):**  Stores configuration settings, network data, user information, and performance metrics.  It provides persistent storage, allows for complex data relationships, and enables efficient querying of historical data.
-
-*   **PHP (Server-Side Scripting Language):** Powers the web interface. Handles user requests, generates dynamic web pages displaying graphs and data, processes alerts, and provides interactivity.
-
-In short, the database provides storage and organization, while PHP provides the dynamic web interface for interaction and visualization.
-
-## 1. Cacti Installation
-
-### Step 1: Update System
+## 1. Install Cacti (SNMP Graphing)
+### Installation
 
 ```bash
+# Update package repositories
 sudo apt update
-sudo apt upgrade -y
+
+# Install Cacti and its dependencies
+sudo apt install -y cacti snmpd snmp
+
+# During installation:
+# - Choose to configure database with dbconfig-common: Yes
+# - Enter MySQL password when prompted
+# - Select Apache2 when prompted for web server
 ```
 
-### Step 2: Install Dependencies
+### Configure SNMP Service
 
 ```bash
-sudo apt install apache2 mysql-server php php-cli php-mysql php-snmp php-gd php-xml snmp snmpd rrdtool build-essential librrds-perl libapache2-mod-php -y
+# Edit SNMP configuration
+sudo nano /etc/snmp/snmpd.conf
+
+# Add or modify these lines:
+# Replace 'public' with your preferred community string
+rocommunity public
+syslocation "Your Location"
+syscontact admin@example.com
+
+# Restart SNMP service
+sudo systemctl restart snmpd
+sudo systemctl enable snmpd
 ```
 
-### Step 3: Install Cacti
+### Access Cacti
+Visit `http://<VM_IP>/cacti` in your browser.
+
+Initial login credentials:
+- Username: admin
+- Password: admin
+
+Follow the setup wizard to complete installation.
+
+### Troubleshooting
+- If you can't access the web interface, check Apache status:
+  ```bash
+  sudo systemctl status apache2
+  ```
+- Check logs for errors:
+  ```bash
+  sudo tail -30 /var/log/apache2/error.log
+  ```
+
+## 2. Install NetData (Real-time Monitoring)
+### Installation
 
 ```bash
-sudo apt install cacti -y
+# Install dependencies
+sudo apt install -y curl wget
+
+# Download and run the installation script
+wget -O /tmp/netdata-kickstart.sh https://my-netdata.io/kickstart.sh
+sudo sh /tmp/netdata-kickstart.sh --stable-channel
 ```
 
-### Step 4: Configure MySQL for Cacti
+### Access NetData
+Visit `http://<VM_IP>:19999` in your browser to access the NetData dashboard.
+
+### Configure Alerts (Optional)
 
 ```bash
-sudo mysql -u root -p
+# Edit the health configuration
+sudo nano /etc/netdata/health_alarm_notify.conf
+
+# Configure email alerts
+sudo nano /etc/netdata/health.d/cpu.conf
 ```
 
-(Enter your root password when prompted.)
+### Troubleshooting
+- If NetData isn't running, check service status:
+  ```bash
+  sudo systemctl status netdata
+  ```
+- Check logs for errors:
+  ```bash
+  sudo tail -30 /var/log/netdata/error.log
+  ```
+- If port 19999 isn't accessible, verify firewall settings:
+  ```bash
+  sudo ufw status
+  ```
 
-In the MySQL shell:
-
-```sql
-CREATE DATABASE cacti;
-GRANT ALL PRIVILEGES ON cacti.* TO 'cactiuser'@'localhost' IDENTIFIED BY 'password';
-FLUSH PRIVILEGES;
-EXIT;
-```
-
-**Important:** Replace `'password'` with a strong password.
-
-### Step 5: Configure Cacti
+## 3. Install Nagios Core (Service Monitoring)
+### Installation
 
 ```bash
-sudo nano /etc/cacti/db.php
-```
-
-Modify the following lines:
-
-```php
-$db_hostname = "localhost";
-$db_name = "cacti";
-$db_user = "cactiuser";
-$db_pass = "password";  // Use the password you set in MySQL.
-```
-
-**Important:** Use the same password you set in the MySQL shell.
-
-### Step 6: Setup Apache
-
-```bash
-sudo a2ensite cacti
-sudo systemctl restart apache2
-```
-
-Access Cacti through your browser at `http://<your_VM_IP>/cacti`. Follow the web installer instructions to finish the installation.
-
-## 2. Icinga 2 Installation
-
-### Step 1: Install the Icinga 2 repository
-
-```bash
-wget -O - https://packages.icinga.com/icinga.key | sudo tee /etc/apt/trusted.gpg.d/icinga.asc
-```
-
-```bash
-echo "deb https://packages.icinga.com/icinga2/debian icinga-2-stable main" | sudo tee /etc/apt/sources.list.d/icinga.list
-```
-
-### Step 2: Update Package List and Install Icinga 2
-
-```bash
+# Install Nagios and plugins
 sudo apt update
-sudo apt install icinga2 icinga2-ido-mysql -y
+sudo apt install -y nagios4 nagios-plugins nagios-nrpe-plugin
 ```
 
-### Step 3: Configure Icinga 2
+### Configure Web Access
 
 ```bash
-sudo icinga2 feature enable command
-sudo icinga2 feature enable ido-mysql
-sudo icinga2 feature enable api
-```
+# Enable CGI module for Apache
+sudo a2enmod cgi
 
-### Step 4: Create MySQL database for Icinga 2
+# Enable Nagios configuration in Apache
+sudo a2enconf nagios4-cgi
 
-```bash
-sudo mysql -u root -p
-```
-
-(Enter your root password when prompted.)
-
-In the MySQL shell:
-
-```sql
-CREATE DATABASE icinga2;
-GRANT ALL PRIVILEGES ON icinga2.* TO 'icinga2user'@'localhost' IDENTIFIED BY 'password';
-FLUSH PRIVILEGES;
-EXIT;
-```
-
-**Important:** Replace `'password'` with a strong password.
-
-### Step 5: Apply the database schema
-
-```bash
-sudo icinga2 ido-mysql setup
-```
-
-Answer the prompts, using the database name, user, and password you just created.
-
-### Step 6: Start and enable Icinga 2 service
-
-```bash
-sudo systemctl start icinga2
-sudo systemctl enable icinga2
-```
-
-### Step 7: Configure the web interface
-
-```bash
-sudo apt install icingaweb2 icingacli -y
-```
-
-```bash
-sudo icingacli setup config webserver apache
+# Restart Apache
 sudo systemctl restart apache2
 ```
 
-Access Icinga Web 2 via `http://<your_VM_IP>/icingaweb2`.
-
-## 3. LibreNMS Installation
-
-### Step 1: Install dependencies
+### Start and Enable Nagios Service
 
 ```bash
-sudo apt install apache2 mariadb-server php php-cli php-mysql php-gd php-snmp php-xml php-mbstring php-bcmath snmp snmpd git rrdtool librrds-perl -y
+# Start Nagios service
+sudo systemctl start nagios4
+
+# Enable Nagios to start on boot
+sudo systemctl enable nagios4
+
+# Verify Nagios is running
+sudo systemctl status nagios4
 ```
 
-### Step 2: Download LibreNMS
+### Set Nagios Admin Password
 
 ```bash
-cd /opt
-sudo git clone https://github.com/librenms/librenms.git
-sudo chown -R www-data:www-data librenms
-```
+# Create or update admin user password
+sudo htpasswd -c /etc/nagios4/htpasswd.users nagiosadmin
 
-### Step 3: Set up the database
-
-```bash
-sudo mysql -u root -p
-```
-
-(Enter your root password when prompted.)
-
-In the MySQL shell:
-
-```sql
-CREATE DATABASE librenms;
-GRANT ALL PRIVILEGES ON librenms.* TO 'librenms'@'localhost' IDENTIFIED BY 'password';
-FLUSH PRIVILEGES;
-EXIT;
-```
-
-**Important:** Replace `'password'` with a strong password.
-
-### Step 4: Configure LibreNMS
-
-```bash
-cd /opt/librenms
-sudo ./lnms install
-```
-
-Follow the on-screen prompts.  When asked for the database password, enter the password you set in the previous step.
-
-### Step 5: Set up Apache
-
-```bash
-sudo nano /etc/apache2/sites-available/librenms.conf
-```
-
-Add the following configuration:
-
-```apache
-<VirtualHost *:80>
-    DocumentRoot /opt/librenms/html
-    ServerName librenms.local
-
-    <Directory /opt/librenms/html>
-        AllowOverride All
-        Require all granted
-    </Directory>
-</VirtualHost>
-```
-
-```bash
-sudo a2ensite librenms.conf
+# Restart Apache to apply changes
 sudo systemctl restart apache2
 ```
 
-### Step 6: Set up Cron Jobs
+### Access Nagios
+Visit `http://<VM_IP>/nagios` or `http://<VM_IP>/nagios4` in your browser and log in with:
+- Username: nagiosadmin
+- Password: (the password you set)
 
-```bash
-sudo crontab -u librenms -e
-```
+### Troubleshooting
+- If Nagios web interface isn't accessible:
+  ```bash
+  # Check if Nagios service is running
+  sudo systemctl status nagios4
+  
+  # Check Apache configuration
+  sudo apache2ctl -S
+  
+  # Check Apache error logs
+  sudo tail -30 /var/log/apache2/error.log
+  
+  # Ensure CGI is enabled
+  sudo a2enmod cgi
+  sudo systemctl restart apache2
+  ```
+- Test with a simple page to verify Apache is working:
+  ```bash
+  echo "Hello World" | sudo tee /var/www/html/test.html
+  # Then try accessing http://<VM_IP>/test.html
+  ```
 
-Add the following cron job:
+## Conclusion
+You now have three powerful monitoring tools configured on your Debian VM:
+- **Cacti**: For long-term SNMP-based performance graphing
+- **NetData**: For real-time system monitoring and visualization
+- **Nagios Core**: For service monitoring and alerting
 
-```bash
-* * * * * /opt/librenms/poller.php 1>> /dev/null 2>&1
-```
-
-(Select your editor of choice if prompted, typically `nano` is easiest)
-
-### Step 7: Finalize Installation
-
-Access LibreNMS through `http://<your_VM_IP>/` and complete the installation via the web interface.
-
-## Final Tips:
-
-*   Monitor system resource usage (CPU, RAM) when running these tools, especially when running them simultaneously.  Consider staggering polling intervals if performance is an issue.
-*   You can use these tools independently or integrate them.
-*   Configure firewall rules as needed for remote access.
-*   Choose strong passwords!
-*   Adjust the memory allocation for the PHP processes.
-
-This guide provides a basic installation process. You may need to adjust the configuration files and dependencies based on your specific needs and environment.  Good luck!
-
+Each tool serves a different monitoring purpose, providing a comprehensive view of your network and system performance.
